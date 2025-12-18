@@ -112,8 +112,8 @@ async def show_active_coupons(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     for i, coupon in enumerate(active_coupons, 1):
         # Парсим даты
-        created_date = datetime.strptime(str(coupon[4]).split('.')[0], '%Y-%m-%d %H:%M:%S')
-        valid_until_date = datetime.strptime(str(coupon[5]).split('.')[0], '%Y-%m-%d %H:%M:%S')
+        created_date = datetime.strptime(str(coupon['created_at']).split('.')[0], '%Y-%m-%d %H:%M:%S')
+        valid_until_date = datetime.strptime(str(coupon['valid_until']).split('.')[0], '%Y-%m-%d %H:%M:%S')
 
         # Форматируем даты
         created_str = created_date.strftime('%d.%m.%Y')
@@ -133,8 +133,8 @@ async def show_active_coupons(update: Update, context: ContextTypes.DEFAULT_TYPE
         
         message += (
             f"🎄 *Купон #{i}*\n"
-            f"{EMOJIS['gift']} *Скидка:* {coupon[3]}\n"
-            f"🔤 *Кодовое слово:* {coupon[7]}\n"
+            f"{EMOJIS['gift']} *Скидка:* {coupon['coupon']}\n"
+            f"🔤 *Кодовое слово:* {coupon['code_word']}\n"
             f"📅 *Получен:* {created_str}\n"
             f"⏳ *Действует до:* {valid_until_str}\n"
             f"{time_emoji} *Осталось:* {days_text}\n"

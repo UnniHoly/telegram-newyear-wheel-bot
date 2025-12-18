@@ -8,7 +8,7 @@
             "program": "${workspaceFolder}/bot.py",
             "console": "integratedTerminal",
             "env": {
-                "BOT_TOKEN": "8222832336:AAFjvx4McD0p6g-hTQCNZgIgMqwr2sI6nfo"
+                "BOT_TOKEN": "8222832336:AAEbswzhbwUdLCUErKAR0wq-LKzsOBHljLg"
             }
         }
     ]
