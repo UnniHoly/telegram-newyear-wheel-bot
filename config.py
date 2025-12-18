@@ -1,8 +1,8 @@
 import os
 
 # Конфигурация бота
-BOT_TOKEN = os.getenv('BOT_TOKEN', '8222832336:AAFjvx4McD0p6g-hTQCNZgIgMqwr2sI6nfo')
-ADMIN_ID = os.getenv('ADMIN_ID', '671168501')
+BOT_TOKEN = os.getenv('BOT_TOKEN')
+ADMIN_ID = os.getenv('ADMIN_ID')
 
 # Конфигурация купонов с кодовыми словами
 COUPON_CONFIG = {
