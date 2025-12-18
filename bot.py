@@ -343,10 +343,12 @@ async def spin_wheel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE,
         user = update.callback_query.from_user
         message_func = update.callback_query.edit_message_text
         original_message = update.callback_query.message
+        chat_id = update.callback_query.message.chat_id
     elif update.message:
         user = update.message.from_user
         message_func = update.message.reply_text
         original_message = update.message
+        chat_id = update.message.chat_id
     else:
         return
     
@@ -357,7 +359,7 @@ async def spin_wheel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE,
         username = db.get_last_instagram(telegram_id)
     
     # Симуляция кручения колеса с анимацией
-    wheel_message = await update.message.reply_text(
+    wheel_message = await original_message.reply_text(
         f"{EMOJIS['wheel']} *Крутим новогоднее колесо...*\n"
         "🎄🎁🌟⛄❄️🎄🎁🌟⛄❄️"
     )
@@ -405,8 +407,16 @@ async def spin_wheel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE,
         f"• Не передавайте кодовое слово другим\n\n"
         f"{EMOJIS['gift']} *Счастливого Нового Года!*"
     )
-    
-    await update.message.reply_text(result_message, parse_mode='Markdown')
+
+    # Отправляем результат
+    if context and hasattr(context, 'bot'):
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=result_message,
+            parse_mode='Markdown'
+        )
+    else:
+        await original_message.reply_text(result_message, parse_mode='Markdown')
     
     # Кнопки для быстрого доступа
     reminder_keyboard = [[
@@ -414,14 +424,26 @@ async def spin_wheel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE,
         InlineKeyboardButton(f"{EMOJIS['stats']} Статистика", callback_data="show_stats")
     ]]
     
-    await update.message.reply_text(
+    reminder_message = (
         f"📋 *Что дальше?*\n"
         f"• Используйте /mycoupons чтобы посмотреть все купоны\n"
         f"• Новый купон - завтра!\n"
-        f"• Удачных покупок!",
-        reply_markup=InlineKeyboardMarkup(reminder_keyboard),
-        parse_mode='Markdown'
+        f"• Удачных покупок!"
     )
+    
+    if context and hasattr(context, 'bot'):
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=reminder_message,
+            reply_markup=InlineKeyboardMarkup(reminder_keyboard),
+            parse_mode='Markdown'
+        )
+    else:
+        await original_message.reply_text(
+            reminder_message,
+            reply_markup=InlineKeyboardMarkup(reminder_keyboard),
+            parse_mode='Markdown'
+        )
     
     return ConversationHandler.END
 
