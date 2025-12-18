@@ -1,0 +1,15 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Debug Bot",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/bot.py",
+            "console": "integratedTerminal",
+            "env": {
+                "BOT_TOKEN": "8222832336:AAFjvx4McD0p6g-hTQCNZgIgMqwr2sI6nfo"
+            }
+        }
+    ]
+}

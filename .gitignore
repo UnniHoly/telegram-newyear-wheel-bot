@@ -205,3 +205,25 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Секретные файлы
+.env
+.env.local
+.env.production
+
+# Файлы с паролями и ключами
+*.key
+*.pem
+*.cert
+
+# Базы данных SQLite
+*.db
+*.sqlite
+*.sqlite3
+
+# Логи
+*.log
+
+# Питон
+__pycache__/
+*.py[cod]
