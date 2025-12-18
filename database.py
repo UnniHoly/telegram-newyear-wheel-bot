@@ -184,13 +184,64 @@ class Database:
                 'valid_until': valid_until
             }
     
-    def mark_coupon_used(self, coupon_id):
-        """Отметить купон как использованный"""
+    def mark_coupon_used_by_instagram(self, instagram, coupon_value):
+        """Пометить один активный купон пользователя как использованный"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('UPDATE coupons SET used = 1 WHERE id = ?', (coupon_id,))
-            conn.commit()
-            return cursor.rowcount > 0
+            
+            # Ищем активный купон пользователя с указанной скидкой
+            cursor.execute('''
+                SELECT id, code_word, created_at 
+                FROM coupons 
+                WHERE username = ? 
+                AND coupon = ? 
+                AND used = 0 
+                AND valid_until >= datetime('now')
+                ORDER BY created_at ASC
+                LIMIT 1
+            ''', (instagram, coupon_value))
+            
+            coupon = cursor.fetchone()
+            
+            if coupon:
+                # Помечаем купон как использованный
+                cursor.execute('UPDATE coupons SET used = 1 WHERE id = ?', (coupon['id'],))
+                conn.commit()
+                
+                return {
+                    'success': True,
+                    'coupon_id': coupon['id'],
+                    'code_word': coupon['code_word'],
+                    'created_at': coupon['created_at']
+                }
+            else:
+                # Проверяем, есть ли вообще пользователь с таким инстаграмом
+                cursor.execute('SELECT COUNT(*) FROM coupons WHERE username = ?', (instagram,))
+                user_exists = cursor.fetchone()[0] > 0
+                
+                if user_exists:
+                    # Проверяем, есть ли купоны с такой скидкой (даже использованные)
+                    cursor.execute('''
+                        SELECT COUNT(*) FROM coupons 
+                        WHERE username = ? AND coupon = ?
+                    ''', (instagram, coupon_value))
+                    coupon_exists = cursor.fetchone()[0] > 0
+                    
+                    if coupon_exists:
+                        return {
+                            'success': False,
+                            'reason': 'Все купоны с этой скидкой уже использованы или истекли'
+                        }
+                    else:
+                        return {
+                            'success': False,
+                            'reason': 'У пользователя нет купонов с такой скидкой'
+                        }
+                else:
+                    return {
+                        'success': False,
+                        'reason': 'Пользователь с таким Instagram не найден'
+                    }
     
     # АДМИН МЕТОДЫ
     def get_admin_stats(self):

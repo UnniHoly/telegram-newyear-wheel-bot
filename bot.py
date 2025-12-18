@@ -20,13 +20,15 @@ from database import db
 # Настройка логирования
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    level=logging.INFO,
+    filename='bot_debug.log'  # Добавляем запись в файл
 )
 logger = logging.getLogger(__name__)
 
 # Состояния
 INSTAGRAM_USERNAME = 1
 ADMIN_MENU = 2
+ADMIN_MARK_COUPON = 3 
 
 # Эмодзи для оформления
 EMOJIS = {
@@ -461,13 +463,13 @@ async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if str(user.id) != config.ADMIN_ID:
         await update.message.reply_text("⛔ Доступ запрещен.")
-        return
+        return ConversationHandler.END
     
     keyboard = [
         [InlineKeyboardButton(f"{EMOJIS['stats']} Статистика", callback_data="admin_stats")],
         [InlineKeyboardButton(f"{EMOJIS['users']} Пользователи", callback_data="admin_users")],
-        [InlineKeyboardButton(f"{EMOJIS['search']} Поиск", callback_data="admin_search")],
         [InlineKeyboardButton(f"{EMOJIS['export']} Экспорт", callback_data="admin_export")],
+        [InlineKeyboardButton(f"{EMOJIS['check']} Пометить купон", callback_data="admin_mark_used")],
         [InlineKeyboardButton(f"{EMOJIS['refresh']} Обновить", callback_data="admin_refresh")]
     ]
     
@@ -489,23 +491,107 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
     query = update.callback_query
     await query.answer()
     
+    logger.info(f"Admin callback received: {query.data}")
+    
     if query.data == "admin_stats":
         await show_admin_stats(query=query)
     elif query.data == "admin_users":
-        await show_admin_users(query)
-    elif query.data == "admin_search":
-        await query.edit_message_text(
-            "🔍 *Поиск купонов*\n\n"
-            "Отправьте username, купон или кодовое слово для поиска:",
-            parse_mode='Markdown'
-        )
-        context.user_data['awaiting_search'] = True
+        # Показываем первую страницу пользователей
+        await show_admin_users(query, page=0)
+    elif query.data.startswith("admin_users_page_"):
+        # Обработка пагинации
+        try:
+            page_num = int(query.data.split("_")[-1])
+            await show_admin_users(query, page=page_num)
+        except (ValueError, IndexError):
+            await show_admin_users(query, page=0)
     elif query.data == "admin_export":
         await export_data(query)
+    elif query.data == "admin_mark_used":
+        logger.info("Admin wants to mark coupon as used")
+        await query.edit_message_text(
+            f"{EMOJIS['check']} *Пометить купон использованным*\n\n"
+            f"Отправьте данные в формате:\n"
+            f"`instagram_username скидка`\n\n"
+            f"*Пример:*\n"
+            f"`username123 15%`\n\n"
+            f"Бот найдет активный купон этого пользователя с указанной скидкой "
+            f"и пометит один любой купон как использованный.",
+            parse_mode='Markdown'
+        )
+        context.user_data['awaiting_mark_coupon'] = True
+        return ADMIN_MARK_COUPON
     elif query.data == "admin_refresh":
         await show_admin_menu(update, context)
     elif query.data == "back_to_admin":
         await show_admin_menu(update, context)
+    
+    return ADMIN_MENU
+
+async def handle_admin_mark_coupon(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка пометки купона использованным"""
+
+    logger.info(f"handle_admin_mark_coupon called with text: {update.message.text}")
+    
+    input_text = update.message.text.strip()
+
+    # Парсим ввод
+    parts = input_text.split()
+    if len(parts) < 2:
+        await update.message.reply_text(
+            "❌ Неверный формат. Используйте: `instagram_username скидка`\n"
+            "Пример: `username123 15%`",
+            parse_mode='Markdown'
+        )
+        return ADMIN_MARK_COUPON
+    
+    instagram = parts[0].replace('@', '')  # Убираем @ если есть
+    coupon_value = parts[1]
+    
+    # Добавляем % если его нет
+    if not coupon_value.endswith('%'):
+        coupon_value = coupon_value + '%'
+    
+    logger.info(f"Searching for coupon: instagram={instagram}, coupon={coupon_value}")
+    
+    # Ищем активный купон
+    result = db.mark_coupon_used_by_instagram(instagram, coupon_value)
+    
+    if result['success']:
+        message = (
+            f"{EMOJIS['check']} *Купон отмечен использованным!*\n\n"
+            f"👤 Instagram: @{instagram}\n"
+            f"🎁 Скидка: {coupon_value}\n"
+            f"📅 Дата создания: {result['created_at']}\n"
+            f"🏷️ ID купона: {result['coupon_id']}\n\n"
+            f"✅ Купон успешно помечен как использованный."
+        )
+    else:
+        message = (
+            f"{EMOJIS['cross']} *Не удалось найти активный купон*\n\n"
+            f"👤 Instagram: @{instagram}\n"
+            f"🎁 Скидка: {coupon_value}\n\n"
+            f"*Возможные причины:*\n"
+            f"1. Пользователь не найден\n"
+            f"2. Нет активных купонов с такой скидкой\n"
+            f"3. Все купоны уже использованы\n"
+            f"4. Купоны истекли"
+        )
+    
+    await update.message.reply_text(message, parse_mode='Markdown')
+    
+    # Очищаем состояние и возвращаем в админ-меню
+    context.user_data['awaiting_mark_coupon'] = False
+    
+    # Возвращаем кнопку для возврата в админ-меню
+    keyboard = [[
+        InlineKeyboardButton(f"{EMOJIS['back']} В админ-меню", callback_data="back_to_admin")
+    ]]
+    
+    await update.message.reply_text(
+        "Выберите действие:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
     
     return ADMIN_MENU
 
@@ -521,8 +607,8 @@ async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton(f"{EMOJIS['stats']} Статистика", callback_data="admin_stats")],
         [InlineKeyboardButton(f"{EMOJIS['users']} Пользователи", callback_data="admin_users")],
-        [InlineKeyboardButton(f"{EMOJIS['search']} Поиск", callback_data="admin_search")],
         [InlineKeyboardButton(f"{EMOJIS['export']} Экспорт", callback_data="admin_export")],
+        [InlineKeyboardButton(f"{EMOJIS['check']} Пометить купон", callback_data="admin_mark_used")],
         [InlineKeyboardButton(f"{EMOJIS['refresh']} Обновить", callback_data="admin_refresh")]
     ]
     
@@ -590,8 +676,8 @@ async def show_admin_stats(query=None, update=None, context=None):
                 parse_mode='Markdown'
             )
 
-async def show_admin_users(query):
-    """Показать пользователей"""
+async def show_admin_users(query, page=0):
+    """Показать пользователей с активными купонами с пагинацией"""
     try:
         users = db.get_all_users()
         
@@ -599,131 +685,147 @@ async def show_admin_users(query):
             await query.edit_message_text("Пользователей нет.")
             return
         
-        message = f"{EMOJIS['users']} *Все пользователи:*\n\n"
+        # Настройки пагинации
+        users_per_page = 10
+        total_pages = (len(users) + users_per_page - 1) // users_per_page
+        current_page = page
+        start_idx = current_page * users_per_page
+        end_idx = min(start_idx + users_per_page, len(users))
         
-        for i, user in enumerate(users[:10], 1):  # Показываем первые 10
-            joined_date = datetime.strptime(str(user['joined_at']).split('.')[0], '%Y-%m-%d %H:%M:%S')
+        message = f"{EMOJIS['users']} *Все пользователи:*\n"
+        message += f"Страница {current_page + 1} из {total_pages}\n\n"
+        
+        for i, user in enumerate(users[start_idx:end_idx], start_idx + 1):
+            # Получаем активные купоны пользователя
+            active_coupons = db.get_active_coupons(user['telegram_id'])
+            
             message += (
-                f"{i}. ID: {user['telegram_id']}\n"
-                f"   👤: @{user['username'] or 'N/A'}\n"
-                f"   📅: {joined_date}\n"
-                f"   🎯: {user['total_spins']} спинов\n"
-                f"   🎁: {user['total_coupons']} купонов\n"
-                f"{'-'*30}\n"
+                f"{i}. *ID:* {user['telegram_id']}\n"
+                f"   👤 Instagram: @{user['username'] or 'N/A'}\n"
+                f"   📊 Всего купонов: {user['total_coupons']}\n"
             )
+            
+            if active_coupons:
+                message += f"   🎁 *Активные купоны:*\n"
+                for coupon in active_coupons[:3]:  # Показываем до 3 активных купонов
+                    created_date = datetime.strptime(str(coupon['created_at']).split('.')[0], '%Y-%m-%d %H:%M:%S')
+                    valid_until_date = datetime.strptime(str(coupon['valid_until']).split('.')[0], '%Y-%m-%d %H:%M:%S')
+                    
+                    message += (
+                        f"      • {coupon['coupon']} (с {created_date.strftime('%d.%m')} по {valid_until_date.strftime('%d.%m')})\n"
+                    )
+                
+                if len(active_coupons) > 3:
+                    message += f"      ... и еще {len(active_coupons) - 3} активных\n"
+            else:
+                message += f"   📭 Нет активных купонов\n"
+            
+            message += f"{'-'*40}\n"
         
-        if len(users) > 10:
-            message += f"\n... и еще {len(users) - 10} пользователей"
+        # Создаем клавиатуру с кнопками пагинации
+        keyboard = []
         
-        keyboard = [[
+        # Кнопки навигации
+        nav_buttons = []
+        
+        if current_page > 0:
+            nav_buttons.append(InlineKeyboardButton(f"⬅️ Предыдущая", callback_data=f"admin_users_page_{current_page - 1}"))
+        
+        if current_page < total_pages - 1:
+            nav_buttons.append(InlineKeyboardButton(f"Следующая ➡️", callback_data=f"admin_users_page_{current_page + 1}"))
+        
+        if nav_buttons:
+            keyboard.append(nav_buttons)
+        
+        # Основные кнопки
+        keyboard.append([
             InlineKeyboardButton(f"{EMOJIS['back']} Назад", callback_data="back_to_admin"),
-            InlineKeyboardButton(f"{EMOJIS['export']} Экспорт", callback_data="admin_export")
-        ]]
+            InlineKeyboardButton(f"{EMOJIS['refresh']} Обновить", callback_data="admin_users_page_0")
+        ])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
         
         await query.edit_message_text(
             message,
-            reply_markup=InlineKeyboardMarkup(keyboard),
+            reply_markup=reply_markup,
             parse_mode='Markdown'
         )
     except Exception as e:
         logger.error(f"Ошибка в show_admin_users: {e}")
-        # Отправляем новое сообщение в случае ошибки
         await query.message.reply_text(
             f"❌ Ошибка при загрузке пользователей: {e}",
             parse_mode='Markdown'
         )
 
-async def handle_admin_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка поиска админом"""
-    if not context.user_data.get('awaiting_search'):
-        return ADMIN_MENU
-    
-    query_text = update.message.text.strip()
-    results = db.search_coupons(query_text)
-    
-    if not results:
-        await update.message.reply_text("Ничего не найдено.")
-        context.user_data['awaiting_search'] = False
-        return ADMIN_MENU
-    
-    message = f"🔍 *Результаты поиска: '{query_text}'*\n\n"
-    
-    for i, coupon in enumerate(results[:10], 1):
-        created_date = datetime.strptime(str(coupon['created_at']).split('.')[0], '%Y-%m-%d %H:%M:%S')
-        valid_until_date = datetime.strptime(str(coupon['valid_until']).split('.')[0], '%Y-%m-%d %H:%M:%S')
-        
-        message += (
-            f"{i}. 🎁 {coupon['coupon']} ({coupon['code_word']})\n"
-            f"   👤: @{coupon['username']}\n"
-            f"   📅: {created_date}\n"
-            f"   ⏳: до {valid_until_date}\n"
-            f"   🏷️: {'✅ Использован' if coupon['used'] else '🔄 Активен'}\n"
-            f"{'-'*30}\n"
-        )
-    
-    if len(results) > 10:
-        message += f"\n... и еще {len(results) - 10} результатов"
-    
-    await update.message.reply_text(message, parse_mode='Markdown')
-    context.user_data['awaiting_search'] = False
-    return ADMIN_MENU
-
 async def export_data(query):
     """Экспорт данных"""
     data = db.export_data()
     
-    # Создаем CSV файл с купонами
-    coupons_csv = io.StringIO()
-    coupons_writer = csv.writer(coupons_csv)
+    # Создаем CSV файл с купонами с UTF-8 BOM для Excel
+    coupons_csv = io.BytesIO()  # Изменяем на BytesIO
+    coupons_writer = csv.writer(io.StringIO(), delimiter=',', quoting=csv.QUOTE_MINIMAL)
     
-    # Заголовки для купонов
-    coupons_writer.writerow([
-        'Дата создания', 'Пользователь', 'Instagram', 
-        'Скидка', 'Кодовое слово', 'Действует до', 'Использован'
-    ])
+    # Создаем список строк для записи
+    coupons_lines = []
+    
+    # Заголовки для купонов с BOM
+    header = ['Дата создания', 'Пользователь', 'Instagram', 
+              'Скидка', 'Кодовое слово', 'Действует по', 'Использован']
+    
+    # Добавляем UTF-8 BOM для корректного отображения в Excel
+    coupons_lines.append('\ufeff' + ','.join(header))
     
     for coupon in data['coupons']:
-        coupons_writer.writerow([
-            coupon['created_at'],
-            coupon['user_name'],
-            coupon['instagram'],
-            coupon['coupon'],
-            coupon['code_word'],
-            coupon['valid_until'],
-            coupon['used']
-        ])
+        # Экранируем значения
+        created_at = str(coupon['created_at']).replace(',', ' ')
+        user_name = str(coupon['user_name']).replace(',', ' ')
+        instagram = str(coupon['instagram']).replace(',', ' ')
+        coupon_code = str(coupon['coupon']).replace(',', ' ')
+        code_word = str(coupon['code_word']).replace(',', ' ')
+        valid_until = str(coupon['valid_until']).replace(',', ' ')
+        used = str(coupon['used']).replace(',', ' ')
+        
+        line = f'"{created_at}","{user_name}","{instagram}","{coupon_code}","{code_word}","{valid_until}","{used}"'
+        coupons_lines.append(line)
     
-    # Создаем CSV файл с пользователями
-    users_csv = io.StringIO()
-    users_writer = csv.writer(users_csv)
+    # Объединяем строки
+    coupons_content = '\n'.join(coupons_lines)
     
-    # Заголовки для пользователей
-    users_writer.writerow([
-        'Telegram ID', 'Username', 'Имя', 'Фамилия', 
-        'Дата регистрации', 'Всего спинов'
-    ])
+    # Создаем CSV файл с пользователями с UTF-8 BOM
+    users_lines = []
+    
+    # Заголовки для пользователей с BOM
+    header = ['Telegram ID', 'Username', 'Имя', 'Фамилия', 
+              'Дата регистрации', 'Всего спинов']
+    
+    users_lines.append('\ufeff' + ','.join(header))
     
     for user in data['users']:
-        users_writer.writerow([
-            user['telegram_id'],
-            user['username'],
-            user['first_name'],
-            user['last_name'],
-            user['joined_at'],
-            user['total_spins']
-        ])
+        # Экранируем значения
+        telegram_id = str(user['telegram_id']).replace(',', ' ')
+        username = str(user['username'] or '').replace(',', ' ')
+        first_name = str(user['first_name'] or '').replace(',', ' ')
+        last_name = str(user['last_name'] or '').replace(',', ' ')
+        joined_at = str(user['joined_at']).replace(',', ' ')
+        total_spins = str(user['total_spins']).replace(',', ' ')
+        
+        line = f'"{telegram_id}","{username}","{first_name}","{last_name}","{joined_at}","{total_spins}"'
+        users_lines.append(line)
+    
+    # Объединяем строки
+    users_content = '\n'.join(users_lines)
     
     # Отправляем файлы
     await query.message.reply_document(
-        document=io.BytesIO(coupons_csv.getvalue().encode()),
+        document=io.BytesIO(coupons_content.encode('utf-8-sig')),  # utf-8-sig добавляет BOM
         filename='coupons_export.csv',
-        caption="📤 Экспорт купонов"
+        caption="📤 Экспорт купонов (кодировка UTF-8)"
     )
     
     await query.message.reply_document(
-        document=io.BytesIO(users_csv.getvalue().encode()),
+        document=io.BytesIO(users_content.encode('utf-8-sig')),  # utf-8-sig добавляет BOM
         filename='users_export.csv',
-        caption="📤 Экспорт пользователей"
+        caption="📤 Экспорт пользователей (кодировка UTF-8)"
     )
     
     # Возвращаем в админ-панель
@@ -733,7 +835,7 @@ async def export_data(query):
     
     await query.edit_message_text(
         "✅ Экспорт завершен!\n\n"
-        "Файлы отправлены выше.",
+        "Файлы отправлены выше.\n",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
@@ -887,36 +989,49 @@ def main():
     # Создание Application
     application = Application.builder().token(config.BOT_TOKEN).build()
     
-    # Conversation Handler для основного потока
-    conv_handler = ConversationHandler(
+    # Conversation Handler для ПОЛЬЗОВАТЕЛЕЙ (только /start)
+    user_conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', start)],
         states={
             INSTAGRAM_USERNAME: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_instagram_username)
             ],
+        },
+        fallbacks=[CommandHandler('cancel', cancel)],
+    )
+    
+    # Упрощенный Conversation Handler для АДМИНОВ
+    admin_conv_handler = ConversationHandler(
+        entry_points=[CommandHandler('admin', admin)],
+        states={
             ADMIN_MENU: [
-                CallbackQueryHandler(admin_callback_handler),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_search)
+                CallbackQueryHandler(admin_callback_handler)
+            ],
+            ADMIN_MARK_COUPON: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_mark_coupon)
             ],
         },
         fallbacks=[CommandHandler('cancel', cancel)],
     )
     
-    # Регистрация обработчиков команд
-    application.add_handler(conv_handler)
-    application.add_handler(CommandHandler('admin', admin))
+    # Регистрируем все хендлеры
+    application.add_handler(user_conv_handler)
+    application.add_handler(admin_conv_handler)
+    
+    # Обычные команды (не в conversation)
     application.add_handler(CommandHandler('mycoupons', show_active_coupons))
     application.add_handler(CommandHandler('spin', spin_wheel_command))
     application.add_handler(CommandHandler('help', help_command))
     
-    # Обработчики callback
+    # Обработчики callback - отдельно для админа
+    application.add_handler(CallbackQueryHandler(
+        admin_callback_handler,
+        pattern="^(admin_stats|admin_users|admin_users_page_.*|admin_export|admin_mark_used|admin_refresh|back_to_admin)$"
+    ))
+    # Обработчики callback для пользователей
     application.add_handler(CallbackQueryHandler(
         button_callback_handler, 
         pattern="^(show_my_coupons|show_stats|spin_wheel|refresh_coupons|show_rules|back_to_coupons)$"
-    ))
-    application.add_handler(CallbackQueryHandler(
-        admin_callback_handler,
-        pattern="^(admin_stats|admin_users|admin_search|admin_export|admin_refresh|back_to_admin)$"
     ))
     
     # Обработчик ошибок
@@ -924,9 +1039,6 @@ def main():
     
     # Запуск бота
     print(f"🚀 {config.BOT_NAME} запускается...")
-    print(f"🤖 ID администратора: {config.ADMIN_ID}")
-    print(f"🎯 Доступные команды: /start, /mycoupons, /help, /admin")
-    print(f"📊 Вероятности купонов: {config.COUPON_CONFIG}")
     
     # Запуск polling
     application.run_polling(allowed_updates=Update.ALL_TYPES)
