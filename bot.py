@@ -1038,7 +1038,7 @@ def main():
     application.add_error_handler(error_handler)
     
     # Запуск бота
-    print(f"🚀 {config.BOT_NAME} запускается...")
+    print(f"🚀 {config.BOT_NAME} запускается в {datetime.now()}...")
     
     # Запуск polling
     application.run_polling(allowed_updates=Update.ALL_TYPES)
