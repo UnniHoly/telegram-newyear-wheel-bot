@@ -69,12 +69,13 @@ class Database:
         """Проверяет, получал ли пользователь купон сегодня (без учета времени)"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            today = datetime.now().date()  # Только дата, без времени
+            # Текущая дата в белорусском часовом поясе
+            today = datetime.now(BELARUS_TZ).date()
             
             cursor.execute('''
                 SELECT id FROM coupons 
                 WHERE telegram_id = ? 
-                AND date(created_at) = ?
+                AND DATE(created_at, 'localtime') = DATE(?, 'localtime')
                 LIMIT 1
             ''', (telegram_id, today))
             
