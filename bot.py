@@ -16,6 +16,8 @@ from telegram.ext import (
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 import config
 from database import db
+import pytz
+BELARUS_TZ = pytz.timezone('Europe/Minsk')
 
 # Настройка логирования
 logging.basicConfig(
@@ -122,8 +124,16 @@ async def show_active_coupons(update: Update, context: ContextTypes.DEFAULT_TYPE
         valid_until_str = valid_until_date.strftime('%d.%m.%Y')
         
         # Считаем сколько дней осталось
-        days_left = (valid_until_date - datetime.now()).days
-        days_text = f"{days_left} дн." if days_left > 0 else "сегодня"
+        current_date = datetime.now(BELARUS_TZ).date()
+        valid_until_date_only = valid_until_date.date()
+
+        # Подсчитываем количество дней ОСТАВШИХСЯ (включая сегодня)
+        days_left = (valid_until_date_only - current_date).days + 1  # +1 чтобы включить сегодняшний день
+
+        if days_left > 0:
+            days_text = f"{days_left} дн."
+        else:
+            days_text = "истёк"
         
         # Эмодзи для срочности
         if days_left <= 1:
@@ -388,8 +398,8 @@ async def spin_wheel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE,
     save_result = db.save_coupon(telegram_id, username, coupon_data)
     
     # Форматирование дат
-    created_date = save_result['created_at'].strftime("%d.%m.%Y")
-    valid_until_date = save_result['valid_until'].strftime("%d.%m.%Y")
+    created_date = save_result['created_at'].astimezone(BELARUS_TZ).strftime("%d.%m.%Y")
+    valid_until_date = save_result['valid_until'].astimezone(BELARUS_TZ).strftime("%d.%m.%Y")
     
     # Сообщение с результатом
     result_message = (
