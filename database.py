@@ -1,10 +1,8 @@
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import random
 import config
 from contextlib import contextmanager
-# В начале файла database.py добавить:
-from datetime import datetime, timedelta, timezone
 import pytz
 
 # Часовой пояс Беларуси (UTC+3)
@@ -152,50 +150,50 @@ class Database:
             'emoji': config.COUPON_CONFIG[coupons[random_index]]['emoji']
         }
     
-def save_coupon(self, telegram_id, username, coupon_data):
-    """Сохранение купона в базу данных"""
-    # Используем текущее время в часовом поясе Беларуси
-    created_at = datetime.now(BELARUS_TZ)
-    valid_until = created_at + timedelta(days=3)
-    
-    # Конвертируем в naive datetime для SQLite
-    created_at_naive = created_at.replace(tzinfo=None)
-    valid_until_naive = valid_until.replace(tzinfo=None)
-    
-    with self.get_connection() as conn:
-        cursor = conn.cursor()
+    def save_coupon(self, telegram_id, username, coupon_data):
+        """Сохранение купона в базу данных"""
+        # Используем текущее время в часовом поясе Беларуси
+        created_at = datetime.now(BELARUS_TZ)
+        valid_until = created_at + timedelta(days=3)
         
-        # Сохраняем купон
-        cursor.execute('''
-            INSERT INTO coupons 
-            (telegram_id, username, coupon, code_word, created_at, valid_until)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (
-            telegram_id, 
-            username, 
-            coupon_data['coupon'], 
-            coupon_data['code_word'],
-            created_at_naive, 
-            valid_until_naive
-        ))
+        # Конвертируем в naive datetime для SQLite
+        created_at_naive = created_at.replace(tzinfo=None)
+        valid_until_naive = valid_until.replace(tzinfo=None)
         
-        # Обновляем статистику пользователя
-        cursor.execute('''
-            INSERT OR REPLACE INTO users 
-            (telegram_id, username, total_spins)
-            VALUES (?, ?, COALESCE(
-                (SELECT total_spins FROM users WHERE telegram_id = ?), 
-                0
-            ) + 1)
-        ''', (telegram_id, username, telegram_id))
-        
-        conn.commit()
-        
-        return {
-            'id': cursor.lastrowid,
-            'created_at': created_at,
-            'valid_until': valid_until
-        }
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Сохраняем купон
+            cursor.execute('''
+                INSERT INTO coupons 
+                (telegram_id, username, coupon, code_word, created_at, valid_until)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (
+                telegram_id, 
+                username, 
+                coupon_data['coupon'], 
+                coupon_data['code_word'],
+                created_at_naive, 
+                valid_until_naive
+            ))
+            
+            # Обновляем статистику пользователя
+            cursor.execute('''
+                INSERT OR REPLACE INTO users 
+                (telegram_id, username, total_spins)
+                VALUES (?, ?, COALESCE(
+                    (SELECT total_spins FROM users WHERE telegram_id = ?), 
+                    0
+                ) + 1)
+            ''', (telegram_id, username, telegram_id))
+            
+            conn.commit()
+            
+            return {
+                'id': cursor.lastrowid,
+                'created_at': created_at,
+                'valid_until': valid_until
+            }
     
     def mark_coupon_used_by_instagram(self, instagram, coupon_value):
         """Пометить один активный купон пользователя как использованный"""

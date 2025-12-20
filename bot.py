@@ -1,4 +1,3 @@
-import logging
 import asyncio
 import csv
 import io
@@ -18,14 +17,6 @@ import config
 from database import db
 import pytz
 BELARUS_TZ = pytz.timezone('Europe/Minsk')
-
-# Настройка логирования
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO,
-    filename='bot_debug.log'  # Добавляем запись в файл
-)
-logger = logging.getLogger(__name__)
 
 # Состояния
 INSTAGRAM_USERNAME = 1
@@ -58,7 +49,6 @@ async def show_active_coupons(update: Update, context: ContextTypes.DEFAULT_TYPE
     """Команда /mycoupons - показать активные купоны пользователя"""
     # Проверка на None
     if not update or not update.effective_user:
-        logger.error("update.effective_user is None в show_active_coupons")
         if update and update.message:
             await update.message.reply_text(
                 "❌ Ошибка определения пользователя. Попробуйте снова."
@@ -74,7 +64,6 @@ async def show_active_coupons(update: Update, context: ContextTypes.DEFAULT_TYPE
         user = update.message.from_user
         message = update.message
     else:
-        logger.error("Не удалось получить message или user")
         return
     
     telegram_id = user.id
@@ -185,7 +174,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = update.message.from_user
         message = update.message
     else:
-        logger.error("Не удалось получить пользователя в /start")
         return
     
     telegram_id = user.id
@@ -501,8 +489,6 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
     query = update.callback_query
     await query.answer()
     
-    logger.info(f"Admin callback received: {query.data}")
-    
     if query.data == "admin_stats":
         await show_admin_stats(query=query)
     elif query.data == "admin_users":
@@ -518,7 +504,6 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
     elif query.data == "admin_export":
         await export_data(query)
     elif query.data == "admin_mark_used":
-        logger.info("Admin wants to mark coupon as used")
         await query.edit_message_text(
             f"{EMOJIS['check']} *Пометить купон использованным*\n\n"
             f"Отправьте данные в формате:\n"
@@ -540,8 +525,6 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
 
 async def handle_admin_mark_coupon(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка пометки купона использованным"""
-
-    logger.info(f"handle_admin_mark_coupon called with text: {update.message.text}")
     
     input_text = update.message.text.strip()
 
@@ -561,8 +544,6 @@ async def handle_admin_mark_coupon(update: Update, context: ContextTypes.DEFAULT
     # Добавляем % если его нет
     if not coupon_value.endswith('%'):
         coupon_value = coupon_value + '%'
-    
-    logger.info(f"Searching for coupon: instagram={instagram}, coupon={coupon_value}")
     
     # Ищем активный купон
     result = db.mark_coupon_used_by_instagram(instagram, coupon_value)
@@ -677,7 +658,6 @@ async def show_admin_stats(query=None, update=None, context=None):
                 parse_mode='Markdown'
             )
     except Exception as e:
-        logger.error(f"Ошибка при редактировании сообщения: {e}")
         # Если не удалось отредактировать, отправляем новое сообщение
         if message:
             await message.reply_text(
@@ -761,7 +741,6 @@ async def show_admin_users(query, page=0):
             parse_mode='Markdown'
         )
     except Exception as e:
-        logger.error(f"Ошибка в show_admin_users: {e}")
         await query.message.reply_text(
             f"❌ Ошибка при загрузке пользователей: {e}",
             parse_mode='Markdown'
@@ -987,7 +966,6 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик ошибок"""
-    logger.error(f"Ошибка: {context.error}")
     
     if update and update.effective_message:
         await update.effective_message.reply_text(
