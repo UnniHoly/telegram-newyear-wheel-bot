@@ -1,7 +1,8 @@
+import logging
 import asyncio
 import csv
 import io
-from datetime import datetime
+from datetime import datetime, timedelta
 from telegram import Update, Bot
 from telegram.ext import (
     Application, 
@@ -15,8 +16,14 @@ from telegram.ext import (
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 import config
 from database import db
-import pytz
-BELARUS_TZ = pytz.timezone('Europe/Minsk')
+
+# Настройка логирования
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO,
+    filename='bot_debug.log'  # Добавляем запись в файл
+)
+logger = logging.getLogger(__name__)
 
 # Состояния
 INSTAGRAM_USERNAME = 1
@@ -49,6 +56,7 @@ async def show_active_coupons(update: Update, context: ContextTypes.DEFAULT_TYPE
     """Команда /mycoupons - показать активные купоны пользователя"""
     # Проверка на None
     if not update or not update.effective_user:
+        logger.error("update.effective_user is None в show_active_coupons")
         if update and update.message:
             await update.message.reply_text(
                 "❌ Ошибка определения пользователя. Попробуйте снова."
@@ -64,6 +72,7 @@ async def show_active_coupons(update: Update, context: ContextTypes.DEFAULT_TYPE
         user = update.message.from_user
         message = update.message
     else:
+        logger.error("Не удалось получить message или user")
         return
     
     telegram_id = user.id
@@ -105,20 +114,15 @@ async def show_active_coupons(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     for i, coupon in enumerate(active_coupons, 1):
         # Парсим даты
-        created_date = datetime.strptime(str(coupon['created_at']).split('.')[0], '%Y-%m-%d %H:%M:%S')
-        valid_until_date = datetime.strptime(str(coupon['valid_until']).split('.')[0], '%Y-%m-%d %H:%M:%S')
+        created_date = datetime.strptime(str(coupon['created_at']).split('.')[0], '%Y-%m-%d %H:%M:%S').date()
+        valid_until_date = datetime.strptime(str(coupon['valid_until']).split('.')[0], '%Y-%m-%d %H:%M:%S').date()
 
         # Форматируем даты
         created_str = created_date.strftime('%d.%m.%Y')
-        valid_until_str = valid_until_date.strftime('%d.%m.%Y')
+        valid_until_str = (valid_until_date - timedelta(days=1)).strftime('%d.%m.%Y')
         
         # Считаем сколько дней осталось
-        current_date = datetime.now(BELARUS_TZ).date()
-        valid_until_date_only = valid_until_date.date()
-
-        # Подсчитываем количество дней ОСТАВШИХСЯ (включая сегодня)
-        days_left = (valid_until_date_only - current_date).days + 1  # +1 чтобы включить сегодняшний день
-
+        days_left = (valid_until_date - datetime.now().date()).days + 1
         if days_left > 0:
             days_text = f"{days_left} дн."
         else:
@@ -137,7 +141,7 @@ async def show_active_coupons(update: Update, context: ContextTypes.DEFAULT_TYPE
             f"{EMOJIS['gift']} *Скидка:* {coupon['coupon']}\n"
             f"🔤 *Кодовое слово:* {coupon['code_word']}\n"
             f"📅 *Получен:* {created_str}\n"
-            f"⏳ *Действует до:* {valid_until_str}\n"
+            f"⏳ *Действует по:* {valid_until_str}\n"
             f"{time_emoji} *Осталось:* {days_text}\n"
         )
         
@@ -174,6 +178,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = update.message.from_user
         message = update.message
     else:
+        logger.error("Не удалось получить пользователя в /start")
         return
     
     telegram_id = user.id
@@ -386,8 +391,8 @@ async def spin_wheel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE,
     save_result = db.save_coupon(telegram_id, username, coupon_data)
     
     # Форматирование дат
-    created_date = save_result['created_at'].astimezone(BELARUS_TZ).strftime("%d.%m.%Y")
-    valid_until_date = save_result['valid_until'].astimezone(BELARUS_TZ).strftime("%d.%m.%Y")
+    created_date = save_result['created_at'].strftime("%d.%m.%Y")
+    valid_until_date = save_result['valid_until'].strftime("%d.%m.%Y")
     
     # Сообщение с результатом
     result_message = (
@@ -396,11 +401,11 @@ async def spin_wheel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE,
         f"📊 *Скидка:* {coupon_data['coupon']}\n"
         f"🎭 *Кодовое слово:* {coupon_data['code_word']}\n"
         f"📅 *Действует:* с {created_date} до {valid_until_date}\n"
-        f"📱 *Instagram:* @{username}\n\n"
+        f"📱 *Instagram:* `@{username}`\n\n"
         f"🎄 *Как использовать:*\n"
         f"1. Сделайте заказ\n"
         f"2. Назовите кодовое слово\n"
-        f"3. Получите скидку!\n\n"
+        f"3. Получите ваш заказ со скидкой!\n\n"
         f"⭐ *Важная информация:*\n"
         f"• Купон действует 3 дня\n"
         f"• Один купон на один заказ\n"
@@ -468,7 +473,6 @@ async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton(f"{EMOJIS['users']} Пользователи", callback_data="admin_users")],
         [InlineKeyboardButton(f"{EMOJIS['export']} Экспорт", callback_data="admin_export")],
         [InlineKeyboardButton(f"{EMOJIS['check']} Пометить купон", callback_data="admin_mark_used")],
-        [InlineKeyboardButton(f"{EMOJIS['refresh']} Обновить", callback_data="admin_refresh")]
     ]
     
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -516,8 +520,6 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
         )
         context.user_data['awaiting_mark_coupon'] = True
         return ADMIN_MARK_COUPON
-    elif query.data == "admin_refresh":
-        await show_admin_menu(update, context)
     elif query.data == "back_to_admin":
         await show_admin_menu(update, context)
     
@@ -525,6 +527,8 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
 
 async def handle_admin_mark_coupon(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка пометки купона использованным"""
+
+    logger.info(f"handle_admin_mark_coupon called with text: {update.message.text}")
     
     input_text = update.message.text.strip()
 
@@ -551,7 +555,7 @@ async def handle_admin_mark_coupon(update: Update, context: ContextTypes.DEFAULT
     if result['success']:
         message = (
             f"{EMOJIS['check']} *Купон отмечен использованным!*\n\n"
-            f"👤 Instagram: @{instagram}\n"
+            f"👤 Instagram: `@{instagram}`\n"
             f"🎁 Скидка: {coupon_value}\n"
             f"📅 Дата создания: {result['created_at']}\n"
             f"🏷️ ID купона: {result['coupon_id']}\n\n"
@@ -560,7 +564,7 @@ async def handle_admin_mark_coupon(update: Update, context: ContextTypes.DEFAULT
     else:
         message = (
             f"{EMOJIS['cross']} *Не удалось найти активный купон*\n\n"
-            f"👤 Instagram: @{instagram}\n"
+            f"👤 Instagram: `@{instagram}`\n"
             f"🎁 Скидка: {coupon_value}\n\n"
             f"*Возможные причины:*\n"
             f"1. Пользователь не найден\n"
@@ -600,7 +604,6 @@ async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton(f"{EMOJIS['users']} Пользователи", callback_data="admin_users")],
         [InlineKeyboardButton(f"{EMOJIS['export']} Экспорт", callback_data="admin_export")],
         [InlineKeyboardButton(f"{EMOJIS['check']} Пометить купон", callback_data="admin_mark_used")],
-        [InlineKeyboardButton(f"{EMOJIS['refresh']} Обновить", callback_data="admin_refresh")]
     ]
     
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -643,7 +646,7 @@ async def show_admin_stats(query=None, update=None, context=None):
     
     message_text += f"\n👥 *Топ пользователей:*\n"
     for i, user in enumerate(stats['top_users'][:5], 1):
-        message_text += f"{i}. @{user['username'] or 'N/A'} - {user['total_spins']} спинов\n"
+        message_text += f"{i}. `@{user['username']}` - {user['total_spins']} спинов\n"
     
     keyboard = [[
         InlineKeyboardButton(f"{EMOJIS['back']} Назад", callback_data="back_to_admin"),
@@ -658,6 +661,7 @@ async def show_admin_stats(query=None, update=None, context=None):
                 parse_mode='Markdown'
             )
     except Exception as e:
+        logger.error(f"Ошибка при редактировании сообщения: {e}")
         # Если не удалось отредактировать, отправляем новое сообщение
         if message:
             await message.reply_text(
@@ -691,7 +695,7 @@ async def show_admin_users(query, page=0):
             
             message += (
                 f"{i}. *ID:* {user['telegram_id']}\n"
-                f"   👤 Instagram: @{user['username'] or 'N/A'}\n"
+                f"   👤 Instagram: `@{user['username']}`\n"
                 f"   📊 Всего купонов: {user['total_coupons']}\n"
             )
             
@@ -702,7 +706,7 @@ async def show_admin_users(query, page=0):
                     valid_until_date = datetime.strptime(str(coupon['valid_until']).split('.')[0], '%Y-%m-%d %H:%M:%S')
                     
                     message += (
-                        f"      • {coupon['coupon']} (с {created_date.strftime('%d.%m')} по {valid_until_date.strftime('%d.%m')})\n"
+                        f"      • {coupon['coupon']} (с {created_date.strftime('%d.%m')} до {valid_until_date.strftime('%d.%m')})\n"
                     )
                 
                 if len(active_coupons) > 3:
@@ -741,6 +745,7 @@ async def show_admin_users(query, page=0):
             parse_mode='Markdown'
         )
     except Exception as e:
+        logger.error(f"Ошибка в show_admin_users: {e}")
         await query.message.reply_text(
             f"❌ Ошибка при загрузке пользователей: {e}",
             parse_mode='Markdown'
@@ -842,12 +847,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"2. Получаете скидку и кодовое слово\n"
         f"3. Используете кодовое слово при заказе\n"
         f"4. Получаете скидку!\n\n"
-        
-        f"🎄 *Кодовые слова:*\n"
-        f"• 🎁 Подарок - 5% скидка\n"
-        f"• 🌟 Сочельник - 10% скидка\n"
-        f"• ⛄ Снеговик - 15% скидка\n"
-        f"• ❄️ Снегурочка - 20% скидка\n\n"
         
         f"📅 *Правила:*\n"
         f"• Один купон в день на человека\n"
@@ -966,6 +965,7 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик ошибок"""
+    logger.error(f"Ошибка: {context.error}")
     
     if update and update.effective_message:
         await update.effective_message.reply_text(
@@ -1014,7 +1014,7 @@ def main():
     # Обработчики callback - отдельно для админа
     application.add_handler(CallbackQueryHandler(
         admin_callback_handler,
-        pattern="^(admin_stats|admin_users|admin_users_page_.*|admin_export|admin_mark_used|admin_refresh|back_to_admin)$"
+        pattern="^(admin_stats|admin_users|admin_users_page_.*|admin_export|admin_mark_used|back_to_admin)$"
     ))
     # Обработчики callback для пользователей
     application.add_handler(CallbackQueryHandler(

@@ -1,12 +1,8 @@
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 import random
 import config
 from contextlib import contextmanager
-import pytz
-
-# Часовой пояс Беларуси (UTC+3)
-BELARUS_TZ = pytz.timezone('Europe/Minsk')
 
 class Database:
     def __init__(self, db_path='coupons.db'):
@@ -67,13 +63,12 @@ class Database:
         """Проверяет, получал ли пользователь купон сегодня (без учета времени)"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            # Текущая дата в белорусском часовом поясе
-            today = datetime.now(BELARUS_TZ).date()
+            today = datetime.now().date()  # Только дата, без времени
             
             cursor.execute('''
                 SELECT id FROM coupons 
                 WHERE telegram_id = ? 
-                AND DATE(created_at, 'localtime') = DATE(?, 'localtime')
+                AND date(created_at) = ?
                 LIMIT 1
             ''', (telegram_id, today))
             
@@ -83,8 +78,7 @@ class Database:
         """Получает активные купоны пользователя (не истекшие и не использованные)"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            # Используем текущее время в белорусском часовом поясе
-            now = datetime.now(BELARUS_TZ).replace(tzinfo=None)
+            now = datetime.now()
             
             cursor.execute('''
                 SELECT * FROM coupons 
@@ -152,13 +146,8 @@ class Database:
     
     def save_coupon(self, telegram_id, username, coupon_data):
         """Сохранение купона в базу данных"""
-        # Используем текущее время в часовом поясе Беларуси
-        created_at = datetime.now(BELARUS_TZ)
+        created_at = datetime.now()
         valid_until = created_at + timedelta(days=3)
-        
-        # Конвертируем в naive datetime для SQLite
-        created_at_naive = created_at.replace(tzinfo=None)
-        valid_until_naive = valid_until.replace(tzinfo=None)
         
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -173,8 +162,8 @@ class Database:
                 username, 
                 coupon_data['coupon'], 
                 coupon_data['code_word'],
-                created_at_naive, 
-                valid_until_naive
+                created_at, 
+                valid_until
             ))
             
             # Обновляем статистику пользователя
@@ -291,7 +280,10 @@ class Database:
             
             # Активные пользователи
             cursor.execute('''
-                SELECT telegram_id, username, total_spins 
+                SELECT 
+                    telegram_id, 
+                    COALESCE(username, 'N/A') as username, 
+                    total_spins 
                 FROM users 
                 ORDER BY total_spins DESC 
                 LIMIT 10
